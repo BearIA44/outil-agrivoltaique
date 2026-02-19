@@ -35,11 +35,18 @@ with st.sidebar:
     st.title("⚙️ Paramètres")
     st.markdown("---")
     
-    st.subheader("1. Foncier")
-    insee = st.text_input("Code INSEE", value="41075")
+    st.subheader("1. Foncier (Localisation & Surface)")
+    insee = st.text_input("Code INSEE (Point GPS central)", value="41075")
     section = st.text_input("Section", value="AA")
     numero = st.text_input("Numéro", value="0010")
     
+    # --- NOUVEAUTÉ : OVERRIDE DE SURFACE ---
+    multi_parcelle = st.checkbox("Projet multi-parcelles (Forcer la surface)")
+    surface_forcee = 0
+    if multi_parcelle:
+        surface_forcee = st.number_input("Surface totale du projet (en hectares)", min_value=0.1, value=15.0, step=0.5, help="Saisissez la surface totale du projet si celui-ci s'étend sur plusieurs parcelles.")
+    
+    st.markdown("---")
     st.subheader("2. Projet")
     taux_couverture = st.slider("Couverture légale (%)", 10, 40, 30) / 100
     type_elevage = st.selectbox("Type d'agriculture", ["Ovin (Moutons)", "Bovin (Vaches)", "Cultures (Trackers)"])
@@ -54,12 +61,12 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("4. Paramètres Experts (Bail)")
     with st.expander("Ouvrir les réglages juridiques"):
-        part_proprio = st.slider("Part du loyer pour le Propriétaire (%)", min_value=10, max_value=100, value=60, help="Le reste ira à l'exploitant agricole (fermier).")
+        part_proprio = st.slider("Part du loyer pour le Propriétaire (%)", min_value=10, max_value=100, value=60)
         part_exploitant = 100 - part_proprio
         
         st.markdown("---")
         inflation = st.number_input("Indexation annuelle (Inflation %)", value=2.0, step=0.1) / 100
-        deg_panneaux = st.number_input("Perte d'efficacité des panneaux (%/an)", value=0.5, step=0.1, help="Standard industriel : -0.5% de rendement par an.") / 100
+        deg_panneaux = st.number_input("Perte d'efficacité des panneaux (%/an)", value=0.5, step=0.1) / 100
 
     st.markdown("---")
     lancer = st.button("🚀 LANCER L'ANALYSE", type="primary", use_container_width=True)
@@ -72,11 +79,14 @@ if not lancer:
 
 if lancer:
     with st.spinner("Analyse en cours..."):
-        api_en_ligne, surface, lat, lon = recuperer_donnees_parcelle(insee, section, numero)
+        api_en_ligne, surface_ign, lat, lon = recuperer_donnees_parcelle(insee, section, numero)
         irradiance = recuperer_ensoleillement_pvgis(lat, lon)
         
+        # --- LOGIQUE DE SURFACE RETENUE ---
+        surface_retenue = surface_forcee if multi_parcelle else surface_ign
+        
         # --- CALCULS DE BASE ---
-        surface_m2_couverte = (surface * 10000) * taux_couverture
+        surface_m2_couverte = (surface_retenue * 10000) * taux_couverture
         puissance_kwc = surface_m2_couverte / 5 
         production_kwh = surface_m2_couverte * irradiance * 0.21 * 0.80
         ca_annuel = production_kwh * 0.07 
@@ -86,7 +96,7 @@ if lancer:
         taux_loyer_juste = max(0.015, 0.06 - penalite_structure - penalite_reseau)
         
         loyer_total_cible = ca_annuel * taux_loyer_juste
-        loyer_ha_cible_total = loyer_total_cible / surface
+        loyer_ha_cible_total = loyer_total_cible / surface_retenue
         
         # --- RÉPARTITION JURIDIQUE ---
         loyer_ha_proprio = loyer_ha_cible_total * (part_proprio / 100)
@@ -95,11 +105,17 @@ if lancer:
         # --- AFFICHAGE ---
         st.title(f"Dossier Parcelle : {section}-{numero} ({insee})")
         if not api_en_ligne:
-            st.warning("⚠️ Serveurs gouvernementaux inaccessibles en ce moment. Affichage du mode 'Démonstration' avec des données simulées pour garantir la continuité du service.")
+            st.warning("⚠️ Serveurs gouvernementaux inaccessibles en ce moment. Affichage du mode 'Démonstration'.")
         
         tab1, tab2, tab3 = st.tabs(["📍 Synthèse & Carte", "📈 Projection Financière (30 ans)", "⚖️ Argumentaire Juridique"])
         
         with tab1:
+            # Message adapté selon la source de la surface
+            if multi_parcelle:
+                st.success(f"✅ Surface globale personnalisée : **{round(surface_retenue, 2)} hectares** (Météo basée sur les coordonnées GPS de la parcelle {section}-{numero})")
+            else:
+                st.success(f"✅ Surface confirmée par le cadastre (IGN) : **{round(surface_retenue, 2)} hectares**")
+                
             st.subheader("💰 Potentiel Financier du Terrain")
             col_met1, col_met2, col_met3 = st.columns(3)
             col_met1.metric("Loyer Cible TOTAL", f"{round(loyer_ha_cible_total)} € / ha / an")
@@ -110,13 +126,13 @@ if lancer:
                 st.markdown("---")
                 diff = loyer_ha_proprio - loyer_propose
                 if diff > 500:
-                    st.error(f"⚠️ **OFFRE SOUS-ÉVALUÉE POUR VOTRE CLIENT :** Le développeur propose {loyer_propose} €/ha au propriétaire, mais il devrait toucher au moins {round(loyer_ha_proprio)} €/ha avec une répartition à {part_proprio}%.")
+                    st.error(f"⚠️ **OFFRE SOUS-ÉVALUÉE POUR VOTRE CLIENT :** Le développeur propose {loyer_propose} €/ha au propriétaire, mais il devrait toucher au moins {round(loyer_ha_proprio)} €/ha.")
                 elif diff < -500:
                     st.warning(f"⚠️ **OFFRE SUSPECTE :** Risque de non-financement bancaire.")
                 else:
                     st.success(f"✅ **OFFRE JUSTE :** Proposition cohérente pour le propriétaire.")
             
-            st.markdown("### 🗺️ Vue Satellite")
+            st.markdown("### 🗺️ Vue Satellite (Point central)")
             df_carte = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             st.map(df_carte, zoom=13)
 
@@ -139,10 +155,9 @@ if lancer:
         with tab3:
             st.subheader("🔍 Données opposables pour la rédaction du bail")
             st.markdown(f"""
+            * **Gisement Solaire localisé** : La météo solaire a été extraite spécifiquement sur les coordonnées GPS du point de raccordement central saisi.
+            * **Assiette foncière du bail** : Calcul basé sur une surface totale du projet de **{round(surface_retenue, 2)} hectares**.
+            * **Capacité** : Couverture légale de {taux_couverture*100}% = {round(surface_m2_couverte):,} m² de panneaux solaires.
             * **Taux de redistribution exigible** : Reversement de **{round(taux_loyer_juste * 100, 2)}%** du CA justifié par le type de structure ({type_elevage}).
-            * **Loyer global cible** : {round(loyer_ha_cible_total)} € / hectare / an.
             * **Répartition du bail rural** : Application de la clé de répartition **{part_proprio}% / {part_exploitant}%**.
-                * Indemnité versée à l'exploitant : {round(loyer_ha_exploitant)} €/ha/an.
-                * Loyer net pour le propriétaire foncier : **{round(loyer_ha_proprio)} €/ha/an**.
-            * **Clause de pérennité** : Le modèle financier du développeur intègre une dégradation matérielle de {deg_panneaux*100}% par an. L'indexation du loyer a été fixée à {inflation*100}% pour compenser cette perte de productivité.
             """)
