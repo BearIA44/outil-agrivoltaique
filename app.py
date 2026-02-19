@@ -40,11 +40,11 @@ with st.sidebar:
     section = st.text_input("Section", value="AA")
     numero = st.text_input("Numéro", value="0010")
     
-    # --- NOUVEAUTÉ : OVERRIDE DE SURFACE ---
-    multi_parcelle = st.checkbox("Projet multi-parcelles (Forcer la surface)")
+   # --- NOUVEAUTÉ : OVERRIDE DE SURFACE ---
+    multi_parcelle = st.checkbox("Surface du projet (ha)")
     surface_forcee = 0
     if multi_parcelle:
-        surface_forcee = st.number_input("Surface totale du projet (en hectares)", min_value=0.1, value=15.0, step=0.5, help="Saisissez la surface totale du projet si celui-ci s'étend sur plusieurs parcelles.")
+        surface_forcee = st.number_input("Entrez la surface exacte", min_value=0.1, value=15.0, step=0.5)
     
     st.markdown("---")
     st.subheader("2. Projet")
